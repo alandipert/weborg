@@ -24,7 +24,7 @@
   []
   (comp
     (watch)
-    (speak)
+    (speak :theme "woodblock")
     (heredoc)
     (hoplon)
     (reload)

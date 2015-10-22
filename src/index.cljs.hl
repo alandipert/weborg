@@ -5,11 +5,19 @@
 
 #_(.clear js/localStorage)
 
-(def conn (local-storage (d/create-conn) :conn))
-(def db   (with-let [c (cell @conn)]
-            (add-watch conn (gensym) #(reset! c %4))))
+(defn tx [db txes]
+  (:db-after (d/with db txes nil)))
 
-(def root-id 0)
+(defn make-db []
+  (let [root-node {:db/id -1 :node/root true}
+        schema    {:node/parent {:db/valueType :db.type/ref}}]
+    (tx (d/empty-db schema) [root-node])))
+
+;; (def db (local-storage (cell (make-db)) :conn))
+(def db (cell (make-db)))
+
+(defc= root-id
+  (ffirst (d/q '[:find ?eid :where [?eid :node/root true]] db)))
 
 (defc= num-nodes
   (-> (d/q '[:find (count ?id) :where [?id :node/rank _]] db)
@@ -41,10 +49,10 @@
        (sort-by :rank #(compare %2 %1))))
 
 (defn add! [parent-id title]
-  (d/transact! conn [{:db/id -1
-                      :node/parent parent-id
-                      :node/title title
-                      :node/rank (next-rank @db parent-id)}]))
+  (swap! db tx [{:db/id -1
+                 :node/parent parent-id
+                 :node/title title
+                 :node/rank (next-rank @db parent-id)}]))
 
 (defn descendents [db parent-id]
   (->> (d/q '[:find ?id
@@ -61,8 +69,7 @@
        set))
 
 (defn delete! [ids]
-  (let [tx (map #(vector :db.fn/retractEntity %) ids)]
-    (d/transact! conn tx)))
+  (swap! db tx (mapv #(vector :db.fn/retractEntity %) ids)))
 
 (defn node [ref]
   (cell-let [{:keys [id rank title]} ref]
@@ -74,9 +81,11 @@
            (button :click #(delete! (conj (descendents @db @id) @id)) "Delete")
            (button :click #(add! @id (str (gensym "title"))) "Add")]))
       (ul
-        (loop-tpl :bindings [kid (cell= (children db id))]
+        (loop-tpl :bindings [kid (cell= (when id (children db id)))]
           (node kid))))))
 
+(doseq [x (repeat 1000 1)]
+  (add! x (str (gensym "node"))))
 (html
   (head
     (title "Tree"))
@@ -86,7 +95,7 @@
       :disabled (cell= (zero? num-nodes))
       :click #(delete! (descendents @db 0))
       "Clear")
-    (button :click #(add! root-id (str (gensym "node"))) "Add")
+    (button :click #(add! @root-id (str (gensym "node"))) "Add")
     (ul
       (loop-tpl :bindings [kid (cell= (children db root-id))]
         (node kid)))))
